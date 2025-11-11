@@ -10,50 +10,50 @@ const OPENAI_COMPATIBLE_BASE_URL = process.env.OPENAI_COMPATIBLE_BASE_URL;
 const MODEL = process.env.LLM_MODEL as string;
 
 export const openai = new OpenAI({
-	apiKey: OPENAI_API_KEY,
-	baseURL: OPENAI_COMPATIBLE_BASE_URL,
+  apiKey: OPENAI_API_KEY,
+  baseURL: OPENAI_COMPATIBLE_BASE_URL,
 });
 
 function stripFences(s: string) {
-	return s
-		.replace(/^\s*```(?:json)?/i, "")
-		.replace(/```\s*$/, "")
-		.trim();
+  return s
+    .replace(/^\s*```(?:json)?/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
 }
 function endWithPeriod(s: string) {
-	const t = s.trim();
-	return /[.!?]$/.test(t) ? t : `${t}.`;
+  const t = s.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 function enforceNonMultipleOfFive(n: number, salt: number) {
-	if (!Number.isFinite(n)) return 0;
-	const c = Math.max(0, Math.min(100, Math.round(n)));
-	if (c === 0 || c === 100) return c;
-	if (c % 5 !== 0) return c;
-	return salt % 2 === 0 ? Math.min(100, c + 1) : Math.max(0, c - 1);
+  if (!Number.isFinite(n)) return 0;
+  const c = Math.max(0, Math.min(100, Math.round(n)));
+  if (c === 0 || c === 100) return c;
+  if (c % 5 !== 0) return c;
+  return salt % 2 === 0 ? Math.min(100, c + 1) : Math.max(0, c - 1);
 }
 
 export type AnalysisResult = {
-	relevanceScore: number;
-	explanation: string;
-	matchedTerms?: string[];
-	evidence?: string[];
+  relevanceScore: number;
+  explanation: string;
+  matchedTerms?: string[];
+  evidence?: string[];
 };
 
 export async function analyzeIssueOpenAIStyle(opts: {
-	keyword: string;
-	issue: {
-		id: string;
-		number: number;
-		title: string;
-		body: string;
-		labels: string[];
-		createdAt: string;
-	};
-	maxTokens?: number;
+  keyword: string;
+  issue: {
+    id: string;
+    number: number;
+    title: string;
+    body: string;
+    labels: string[];
+    createdAt: string;
+  };
+  maxTokens?: number;
 }): Promise<AnalysisResult> {
-	const { keyword, issue, maxTokens = 260 } = opts;
+  const { keyword, issue, maxTokens = 260 } = opts;
 
-	const prompt = `
+  const prompt = `
         You are ranking GitHub issues for relevance to the keyword: "${keyword}".
 
         Rules:
@@ -73,50 +73,31 @@ export async function analyzeIssueOpenAIStyle(opts: {
         ${(issue.body || "").slice(0, 3000)}
         `.trim();
 
-	let full = "";
-	try {
-		const stream = await openai.chat.completions.create({
-			model: MODEL,
-			messages: [{ role: "user", content: prompt }],
-			temperature: 0.3,
-			max_tokens: maxTokens,
-			stream: true,
-		});
+  let full = "";
+  try {
+    const resp: any = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: maxTokens,
+      stream: false,
+      response_format: { type: "json_object" } as any,
+    });
+    const m: any = resp?.choices?.[0]?.message;
+    full = m?.content ?? "";
+    if (!full) throw new ConvexError("Empty LLM response");
 
-		for await (const chunk of stream) {
-			full += chunk.choices?.[0]?.delta?.content ?? "";
-		}
-		if (!full) throw new ConvexError("Empty LLM response");
+    const clean = stripFences(full);
+    const parsed: any = JSON.parse(clean);
 
-		const clean = stripFences(full);
-		let parsed: any;
-		try {
-			parsed = JSON.parse(clean);
-		} catch {
-			const m = clean.match(/"relevanceScore"\s*:\s*(\d+)/);
-			const e = clean.match(/"explanation"\s*:\s*"([^"]{0,260})"/);
-			parsed = {
-				relevanceScore: m ? +m[1] : 0,
-				explanation: e?.[1] ?? "Unable to analyze",
-				matchedTerms: [],
-				evidence: [],
-			};
-		}
+    const scoreRaw = Number(parsed.relevanceScore ?? 0);
+    const score = enforceNonMultipleOfFive(scoreRaw, issue.number);
+    const explanation = endWithPeriod(String(parsed.explanation ?? "").slice(0, 260));
+    const matchedTerms = Array.isArray(parsed.matchedTerms) ? parsed.matchedTerms.slice(0, 6) : [];
+    const evidence = Array.isArray(parsed.evidence) ? parsed.evidence.slice(0, 4) : [];
 
-		const scoreRaw = Number(parsed.relevanceScore ?? 0);
-		const score = enforceNonMultipleOfFive(scoreRaw, issue.number);
-		const explanation = endWithPeriod(
-			String(parsed.explanation ?? "").slice(0, 260),
-		);
-		const matchedTerms = Array.isArray(parsed.matchedTerms)
-			? parsed.matchedTerms.slice(0, 6)
-			: [];
-		const evidence = Array.isArray(parsed.evidence)
-			? parsed.evidence.slice(0, 4)
-			: [];
-
-		return { relevanceScore: score, explanation, matchedTerms, evidence };
-	} catch (err: any) {
-		throw new ConvexError(err?.message ?? "LLM call failed");
-	}
+    return { relevanceScore: score, explanation, matchedTerms, evidence };
+  } catch (err: any) {
+    throw new ConvexError(err?.message ?? "LLM call failed");
+  }
 }
