@@ -3,23 +3,16 @@
 import type { Doc } from "../../../../convex/_generated/dataModel";
 
 interface EmailTemplateProps {
-	repoUrl: string;
-	keyword: string;
-	userEmail: string;
-	issues: Doc<"reports">["issues"];
+  repoUrl: string;
+  keyword: string;
+  userEmail: string;
+  issues: Doc<"reports">["issues"];
 }
 
-export async function renderIssueReportEmail({
-	repoUrl,
-	keyword,
-	userEmail,
-	issues,
-}: EmailTemplateProps): Promise<string> {
-	const sortedIssues = [...issues].sort(
-		(a, b) => b.relevanceScore - a.relevanceScore,
-	);
+export async function renderIssueReportEmail({ repoUrl, keyword, userEmail, issues }: EmailTemplateProps): Promise<string> {
+  const sortedIssues = [...issues].sort((a, b) => b.relevanceScore - a.relevanceScore);
 
-	const html = `
+  const html = `
         <!DOCTYPE html>
         <html>
             <head>
@@ -47,14 +40,11 @@ export async function renderIssueReportEmail({
                         <th>Labels</th>
                     </tr>
                     ${sortedIssues
-						.map(
-							(issue) => `
+                      .map(
+                        (issue) => `
                             <tr>
                                 <td>
-								<a href="https://github.com/${repoUrl.replace(
-									"https://github.com/",
-									"",
-								)}/issues/${issue.number}">${issue.title}</a>
+								<a href="https://github.com/${repoUrl.replace("https://github.com/", "")}/issues/${issue.number}">${issue.title}</a>
 								</td>
                                 <td>${issue.relevanceScore}</td>
                                 <td>${issue.explanation}</td>
@@ -62,19 +52,19 @@ export async function renderIssueReportEmail({
                                 <td>${issue.labels.join(", ")}</td>
                             </tr>
                         `,
-						)
-						.join("")}
+                      )
+                      .join("")}
                 </table>
                 <p>
 				${
-					sortedIssues.length > 0
-						? "These are the most relevant issues based on your keyword."
-						: "No relevant issues found for this batch."
-				}
+          sortedIssues.length > 0
+            ? "These are the most relevant issues based on your keyword."
+            : "No relevant issues found for this batch."
+        }
 				</p>
                 <p>Thank you for using GitHub Issue Watcher!</p>
             </body>
         </html>
     `;
-	return html;
+  return html;
 }

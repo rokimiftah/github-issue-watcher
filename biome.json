@@ -1,30 +1,31 @@
 {
-	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
 
-	"assist": {
-		"actions": {
-			"source": {
-				"organizeImports": "off"
-			}
-		}
-	},
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "off"
+      }
+    }
+  },
 
-	"formatter": {
-		"enabled": false
-	},
+  "files": {
+    "includes": ["**", "!**/convex/_generated", "!**/dist", "!**/node_modules"]
+  },
 
-	"linter": {
-		"rules": {
-			"a11y": {
-				"noStaticElementInteractions": "off",
-				"noSvgWithoutTitle": "off",
-				"useButtonType": "off",
-				"useKeyWithClickEvents": "off"
-			},
-			"recommended": true,
-			"suspicious": {
-				"noArrayIndexKey": "off"
-			}
-		}
-	}
+  "formatter": { "enabled": false },
+
+  "linter": {
+    "rules": {
+      "a11y": {
+        "noStaticElementInteractions": "off",
+        "noSvgWithoutTitle": "off",
+        "useButtonType": "off",
+        "useKeyWithClickEvents": "off"
+      },
+      "correctness": { "noUnknownTypeSelector": "off" },
+      "recommended": true,
+      "suspicious": { "noArrayIndexKey": "off" }
+    }
+  }
 }

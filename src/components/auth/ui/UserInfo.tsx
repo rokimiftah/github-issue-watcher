@@ -5,9 +5,9 @@ import { Group } from "@mantine/core";
 import { SignOut } from "./SignOut";
 
 export function UserInfo() {
-	return (
-		<Group justify="end" mb="lg">
-			<SignOut />
-		</Group>
-	);
+  return (
+    <Group justify="end" mb="lg">
+      <SignOut />
+    </Group>
+  );
 }

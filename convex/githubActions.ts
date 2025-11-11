@@ -1,44 +1,41 @@
 // convex/githubActions.ts
 
-import { ConvexError, v } from "convex/values";
-
 import { graphql } from "@octokit/graphql";
+import { ConvexError, v } from "convex/values";
 
 import { action } from "./_generated/server";
 
 export const fetchIssuesBatch = action({
-	args: {
-		repoUrl: v.string(),
-		batchSize: v.number(),
-		after: v.optional(v.string()),
-	},
-	handler: async (_ctx, args) => {
-		const { repoUrl, batchSize, after } = args;
-		console.log("[GIW][fetchIssuesBatch] start", {
-			repoUrl,
-			batchSize,
-			after,
-		});
+  args: {
+    repoUrl: v.string(),
+    batchSize: v.number(),
+    after: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const { repoUrl, batchSize, after } = args;
+    console.log("[GIW][fetchIssuesBatch] start", {
+      repoUrl,
+      batchSize,
+      after,
+    });
 
-		const githubToken = process.env.GITHUB_TOKEN;
-		if (!githubToken) {
-			throw new ConvexError("GITHUB_TOKEN is not set");
-		}
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      throw new ConvexError("GITHUB_TOKEN is not set");
+    }
 
-		const [owner, repo] = repoUrl
-			.replace("https://github.com/", "")
-			.split("/");
-		if (!owner || !repo) {
-			throw new ConvexError("Invalid repository URL");
-		}
-		console.log("[GIW][fetchIssuesBatch] owner/repo", { owner, repo });
+    const [owner, repo] = repoUrl.replace("https://github.com/", "").split("/");
+    if (!owner || !repo) {
+      throw new ConvexError("Invalid repository URL");
+    }
+    console.log("[GIW][fetchIssuesBatch] owner/repo", { owner, repo });
 
-		try {
-			const graphqlWithAuth = graphql.defaults({
-				headers: { authorization: `token ${githubToken}` },
-			});
+    try {
+      const graphqlWithAuth = graphql.defaults({
+        headers: { authorization: `token ${githubToken}` },
+      });
 
-			const query = `
+      const query = `
 				query ($owner: String!, $repo: String!, $batchSize: Int!, $after: String) {
 					repository(owner: $owner, name: $repo) {
 						issues(first: $batchSize, states: [OPEN, CLOSED], after: $after) {
@@ -68,84 +65,75 @@ export const fetchIssuesBatch = action({
 				}
 			`;
 
-			type GitHubIssue = {
-				id: string;
-				number: number;
-				title: string;
-				body: string | null;
-				labels: { nodes: { name: string }[] };
-				createdAt: string;
-				state: "OPEN" | "CLOSED";
-			};
+      type GitHubIssue = {
+        id: string;
+        number: number;
+        title: string;
+        body: string | null;
+        labels: { nodes: { name: string }[] };
+        createdAt: string;
+        state: "OPEN" | "CLOSED";
+      };
 
-			const t0 = Date.now();
-			const response: {
-				repository: {
-					issues: {
-						nodes: GitHubIssue[];
-						pageInfo: { endCursor: string; hasNextPage: boolean };
-					};
-				};
-				rateLimit: { remaining: number; resetAt: string };
-			} = await graphqlWithAuth({
-				query,
-				owner,
-				repo,
-				batchSize,
-				after,
-			});
+      const t0 = Date.now();
+      const response: {
+        repository: {
+          issues: {
+            nodes: GitHubIssue[];
+            pageInfo: { endCursor: string; hasNextPage: boolean };
+          };
+        };
+        rateLimit: { remaining: number; resetAt: string };
+      } = await graphqlWithAuth({
+        query,
+        owner,
+        repo,
+        batchSize,
+        after,
+      });
 
-			const resetAtIso = response.rateLimit.resetAt;
-			const resetAtMs = new Date(resetAtIso).getTime();
-			const dt = Date.now() - t0;
+      const resetAtIso = response.rateLimit.resetAt;
+      const resetAtMs = new Date(resetAtIso).getTime();
+      const dt = Date.now() - t0;
 
-			console.log("[GIW][fetchIssuesBatch] rateLimit", {
-				remaining: response.rateLimit.remaining,
-				resetAt: resetAtIso,
-				durationMs: dt,
-			});
+      console.log("[GIW][fetchIssuesBatch] rateLimit", {
+        remaining: response.rateLimit.remaining,
+        resetAt: resetAtIso,
+        durationMs: dt,
+      });
 
-			if (response.rateLimit.remaining < 100) {
-				const delay = resetAtMs - Date.now();
-				if (delay > 0) {
-					console.log(
-						"[GIW][fetchIssuesBatch] nearing RL → sleep(ms)",
-						delay,
-					);
-					await new Promise((resolve) => setTimeout(resolve, delay));
-				}
-			}
+      if (response.rateLimit.remaining < 100) {
+        const delay = resetAtMs - Date.now();
+        if (delay > 0) {
+          console.log("[GIW][fetchIssuesBatch] nearing RL → sleep(ms)", delay);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
 
-			const issues = response.repository.issues.nodes.map(
-				(issue: GitHubIssue) => ({
-					id: issue.id,
-					number: issue.number,
-					title: issue.title,
-					body: issue.body || "",
-					labels: issue.labels.nodes.map((label) => label.name),
-					createdAt: issue.createdAt,
-					relevanceScore: 0,
-					explanation: "",
-					matchedTerms: [],
-					evidence: [],
-				}),
-			);
+      const issues = response.repository.issues.nodes.map((issue: GitHubIssue) => ({
+        id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        body: issue.body || "",
+        labels: issue.labels.nodes.map((label) => label.name),
+        createdAt: issue.createdAt,
+        relevanceScore: 0,
+        explanation: "",
+        matchedTerms: [],
+        evidence: [],
+      }));
 
-			return {
-				issues,
-				pageInfo: response.repository.issues.pageInfo,
-			};
-		} catch (error) {
-			if (error instanceof Error && error.message.includes("401")) {
-				throw new ConvexError(
-					"GitHub authentication failed. Please check the GITHUB_TOKEN.",
-				);
-			}
-			throw new ConvexError(
-				error instanceof Error
-					? `Failed to fetch issues: ${error.message}`
-					: "Unknown error fetching issues",
-			);
-		}
-	},
+      return {
+        issues,
+        pageInfo: response.repository.issues.pageInfo,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("401")) {
+        throw new ConvexError("GitHub authentication failed. Please check the GITHUB_TOKEN.");
+      }
+      throw new ConvexError(
+        error instanceof Error ? `Failed to fetch issues: ${error.message}` : "Unknown error fetching issues",
+      );
+    }
+  },
 });
