@@ -5,7 +5,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 export const LIMITS = {
-  RPM: 30,
+  RPM: 700,
   RPH: Number.MAX_SAFE_INTEGER,
   TPM: Number.MAX_SAFE_INTEGER,
   TPH: Number.MAX_SAFE_INTEGER,
@@ -15,12 +15,6 @@ export const LIMITS = {
 
 function minuteBucket(ms: number) {
   return `m:${Math.floor(ms / 60_000)}`;
-}
-function hourBucket(ms: number) {
-  return `h:${Math.floor(ms / 3_600_000)}`;
-}
-function dayBucket(ms: number) {
-  return `d:${Math.floor(ms / 86_400_000)}`;
 }
 
 export const getQuota = query({

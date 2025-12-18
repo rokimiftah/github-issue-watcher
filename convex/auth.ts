@@ -9,8 +9,8 @@ import { convexAuth } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import { z } from "zod";
 
-import { ResendOTP } from "./resend/ResendOTP";
-import { ResendOTPPasswordReset } from "./resend/ResendOTPPasswordReset";
+import { SendamaticOTP } from "./sendamatic/SendamaticOTP";
+import { SendamaticOTPPasswordReset } from "./sendamatic/SendamaticOTPPasswordReset";
 
 const PasswordSchema = z
   .string()
@@ -48,8 +48,8 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
     }),
     Password({
       id: "password",
-      verify: ResendOTP,
-      reset: ResendOTPPasswordReset,
+      verify: SendamaticOTP,
+      reset: SendamaticOTPPasswordReset,
       profile: (params) => {
         if (typeof params.email !== "string") {
           throw new ConvexError("Email is required");

@@ -4,14 +4,15 @@
 import { ConvexError } from "convex/values";
 import OpenAI from "openai";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set");
-const OPENAI_COMPATIBLE_BASE_URL = process.env.OPENAI_COMPATIBLE_BASE_URL;
-const MODEL = process.env.LLM_MODEL as string;
+const LLM_API_KEY = process.env.LLM_API_KEY;
+if (!LLM_API_KEY) throw new Error("LLM_API_KEY is not set");
+
+const LLM_API_URL = process.env.LLM_API_URL || "https://apis.iflow.cn/v1";
+const LLM_MODEL = process.env.LLM_MODEL || "glm-4.6";
 
 export const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-  baseURL: OPENAI_COMPATIBLE_BASE_URL,
+  apiKey: LLM_API_KEY,
+  baseURL: LLM_API_URL,
 });
 
 function stripFences(s: string) {
@@ -53,39 +54,55 @@ export async function analyzeIssueOpenAIStyle(opts: {
 }): Promise<AnalysisResult> {
   const { keyword, issue, maxTokens = 260 } = opts;
 
-  const prompt = `
-        You are ranking GitHub issues for relevance to the keyword: "${keyword}".
+  const systemPrompt = "You are a helpful assistant capable of complex reasoning. Always think step-by-step before answering.";
 
-        Rules:
-        - Consider TITLE (0.45), BODY (0.35), LABELS (0.20).
-        - Accept synonyms/aliases of the keyword.
-        - Prefer concrete evidence (error messages, API names).
-        - EXPLANATION: 1-2 sentences (220 chars), mention where match was found.
-        - Output strictly MINIFIED JSON (no markdown).
+  const userPrompt = `
+You are ranking GitHub issues for relevance to the keyword: "${keyword}".
 
-        Respond ONLY with:
-        {"relevanceScore": <0-100 integer not a multiple of 5>, "explanation": "<1-2 sentences, 80-220 chars>", "matchedTerms": ["..."], "evidence": ["<short excerpt or reason>"]}
+Rules:
+- Consider TITLE (0.45), BODY (0.35), LABELS (0.20).
+- Accept synonyms/aliases of the keyword.
+- Prefer concrete evidence (error messages, API names).
+- EXPLANATION: 1-2 sentences (220 chars), mention where match was found.
+- CRITICAL: You MUST respond with valid JSON only, no markdown formatting, no explanations outside the JSON.
 
-        Issue:
-        TITLE: ${issue.title}
-        LABELS: ${issue.labels.join(", ") || "none"}
-        BODY:
-        ${(issue.body || "").slice(0, 3000)}
-        `.trim();
+Respond ONLY with this exact JSON format:
+{"relevanceScore": <0-100 integer not a multiple of 5>, "explanation": "<1-2 sentences, 80-220 chars>", "matchedTerms": ["..."], "evidence": ["<short excerpt or reason>"]}
+
+Issue:
+TITLE: ${issue.title}
+LABELS: ${issue.labels.join(", ") || "none"}
+BODY:
+${(issue.body || "").slice(0, 3000)}
+`.trim();
 
   let full = "";
   try {
     const resp: any = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: maxTokens,
+      model: LLM_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      top_p: 0.9,
+      max_tokens: Math.max(maxTokens, 800),
       stream: false,
-      response_format: { type: "json_object" } as any,
     });
+
+    console.log("[GIW][LLM] Raw response:", JSON.stringify(resp, null, 2));
+
     const m: any = resp?.choices?.[0]?.message;
-    full = m?.content ?? "";
-    if (!full) throw new ConvexError("Empty LLM response");
+    console.log("[GIW][LLM] Message object:", JSON.stringify(m, null, 2));
+
+    full = m?.content ?? m?.reasoning_content ?? "";
+
+    console.log("[GIW][LLM] Extracted content:", full);
+
+    if (!full) {
+      console.error("[GIW][LLM] Empty content detected. Full response structure:", resp);
+      throw new ConvexError("Empty LLM response");
+    }
 
     const clean = stripFences(full);
     const parsed: any = JSON.parse(clean);

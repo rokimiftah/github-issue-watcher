@@ -1,13 +1,13 @@
-// convex/resend/sendReportEmail.ts
+// convex/sendamatic/sendReportEmail.ts
 
 import type { Doc } from "../_generated/dataModel";
 
-import { Resend } from "@convex-dev/resend";
 import { ConvexError, v } from "convex/values";
 
-import { api, components } from "../_generated/api";
+import { api } from "../_generated/api";
 import { action } from "../_generated/server";
 import { renderIssueReportEmail } from "../../src/components/dashboard/template/IssueReportEmail";
+import { createSendamaticClient } from "./SendamaticClient";
 
 interface Issue {
   id: string;
@@ -19,10 +19,6 @@ interface Issue {
   relevanceScore: number;
   explanation: string;
 }
-
-export const resend: Resend = new Resend(components.resend, {
-  testMode: false,
-});
 
 export const sendReportEmail = action({
   args: { reportId: v.id("reports") },
@@ -80,12 +76,18 @@ export const sendReportEmail = action({
         issues: relevantIssues,
       });
 
-      await resend.sendEmail(ctx, {
-        from: "GitHub Issue Watcher <notification@giw.rokimiftah.id>",
+      const sendamatic = createSendamaticClient();
+
+      const result = await sendamatic.sendEmail({
+        from: "GitHub Issue Watcher <notifications@giw.web.id>",
         to: report.userEmail,
         subject: `GIW - GitHub Issues Report for ${report.repoUrl} (${emailType}${batchNumber})`,
         html,
       });
+
+      if (!result.success) {
+        throw new Error(`Sendamatic error: ${result.error}`);
+      }
 
       await ctx.runMutation(api.githubIssues.incrementEmailsSent, {
         reportId: args.reportId,

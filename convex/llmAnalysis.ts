@@ -28,41 +28,6 @@ function stripFences(s: string): string {
     .trim();
 }
 
-function endWithPeriod(s: string) {
-  const t = s.trim();
-  return /[.!?]$/.test(t) ? t : `${t}.`;
-}
-
-function extractAndParseJSON(text: string): {
-  relevanceScore: number;
-  explanation: string;
-  matchedTerms?: string[];
-  evidence?: string[];
-} {
-  const clean = stripFences(text);
-  try {
-    const j = JSON.parse(clean);
-    const raw = Number(j.relevanceScore ?? 0);
-    const score = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0;
-    const expl = String(j.explanation ?? "").slice(0, 260);
-    return {
-      relevanceScore: score,
-      explanation: endWithPeriod(expl),
-      matchedTerms: Array.isArray(j.matchedTerms) ? j.matchedTerms.slice(0, 6) : [],
-      evidence: Array.isArray(j.evidence) ? j.evidence.slice(0, 4) : [],
-    };
-  } catch {
-    const m = clean.match(/"relevanceScore"\s*:\s*(\d+)/);
-    const e = clean.match(/"explanation"\s*:\s*"([^"]{0,260})"/);
-    return {
-      relevanceScore: m ? Math.max(0, Math.min(100, +m[1])) : 0,
-      explanation: endWithPeriod(e?.[1] ?? "Unable to analyze"),
-      matchedTerms: [],
-      evidence: [],
-    };
-  }
-}
-
 async function safeAnalyzeIssue(
   openai: OpenAI,
   prompt: string,
@@ -71,6 +36,7 @@ async function safeAnalyzeIssue(
 ): Promise<{
   relevanceScore: number;
   explanation: string;
+  reasoning?: string;
   matchedTerms?: string[];
   evidence?: string[];
 }> {
@@ -83,18 +49,34 @@ async function safeAnalyzeIssue(
         attempt,
         model,
       });
+      const systemPrompt =
+        "You are a helpful assistant capable of complex reasoning. Always think step-by-step before answering.";
+
       const resp: any = await openai.chat.completions.create({
         model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 260,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+        top_p: 0.9,
+        max_tokens: Math.max(260, 800),
         stream: false,
-        response_format: { type: "json_object" } as any,
       });
+
+      console.log("[GIW][LLM][Analysis] Raw response:", JSON.stringify(resp, null, 2));
+
       const m: any = resp?.choices?.[0]?.message;
+      console.log("[GIW][LLM][Analysis] Message object:", JSON.stringify(m, null, 2));
+
       fullResponse = m?.content ?? "";
 
-      if (!fullResponse) throw new Error("Empty response");
+      console.log("[GIW][LLM][Analysis] Extracted content:", fullResponse);
+
+      if (!fullResponse) {
+        console.error("[GIW][LLM][Analysis] Empty content detected. Full response structure:", resp);
+        throw new Error("Empty response");
+      }
 
       const clean = stripFences(fullResponse);
       const parsed = JSON.parse(clean);
@@ -117,7 +99,7 @@ async function safeAnalyzeIssue(
         };
       }
       const retryAfter = error.response?.headers?.["retry-after"]
-        ? parseInt(error.response.headers["retry-after"]) * 1000
+        ? parseInt(error.response.headers["retry-after"], 10) * 1000
         : 1000 * attempt;
       console.log("[GIW][LLM] backoff(ms)", retryAfter);
       await new Promise((r) => setTimeout(r, retryAfter));
@@ -148,8 +130,8 @@ export const analyzeIssues = action({
     }
 
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-      baseURL: process.env.OPENAI_COMPATIBLE_BASE_URL,
+      apiKey: process.env.LLM_API_KEY,
+      baseURL: process.env.LLM_API_URL,
     });
 
     const model = process.env.LLM_MODEL as string;
@@ -187,7 +169,7 @@ export const analyzeIssues = action({
       console.log("[GIW][analyzeIssues] email scheduled (no pending issues)", {
         reportId,
       });
-      await ctx.scheduler.runAfter(0, api.resend.sendReportEmail.sendReportEmail, {
+      await ctx.scheduler.runAfter(0, api.sendamatic.sendReportEmail.sendReportEmail, {
         reportId,
       });
       return;
@@ -306,7 +288,7 @@ export const analyzeIssues = action({
         delayMs: DELAY_MS,
       });
     } else {
-      await ctx.scheduler.runAfter(0, api.resend.sendReportEmail.sendReportEmail, {
+      await ctx.scheduler.runAfter(0, api.sendamatic.sendReportEmail.sendReportEmail, {
         reportId,
       });
       console.log("[GIW][analyzeIssues] final email scheduled", {

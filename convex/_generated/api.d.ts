@@ -10,6 +10,9 @@
 
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
+import type * as debug from "../debug.js";
+import type * as enqueue from "../enqueue.js";
+import type * as finalize from "../finalize.js";
 import type * as githubActions from "../githubActions.js";
 import type * as githubIssues from "../githubIssues.js";
 import type * as helpers from "../helpers.js";
@@ -19,9 +22,12 @@ import type * as llmClient from "../llmClient.js";
 import type * as llmWorker from "../llmWorker.js";
 import type * as queue from "../queue.js";
 import type * as rateLimiter from "../rateLimiter.js";
-import type * as resend_ResendOTP from "../resend/ResendOTP.js";
-import type * as resend_ResendOTPPasswordReset from "../resend/ResendOTPPasswordReset.js";
-import type * as resend_sendReportEmail from "../resend/sendReportEmail.js";
+import type * as requeue from "../requeue.js";
+import type * as sendamatic_SendamaticClient from "../sendamatic/SendamaticClient.js";
+import type * as sendamatic_SendamaticOTP from "../sendamatic/SendamaticOTP.js";
+import type * as sendamatic_SendamaticOTPPasswordReset from "../sendamatic/SendamaticOTPPasswordReset.js";
+import type * as sendamatic_emailRenderer from "../sendamatic/emailRenderer.js";
+import type * as sendamatic_sendReportEmail from "../sendamatic/sendReportEmail.js";
 import type * as users from "../users.js";
 
 import type {
@@ -30,17 +36,12 @@ import type {
   FunctionReference,
 } from "convex/server";
 
-/**
- * A utility for referencing Convex functions in your app's API.
- *
- * Usage:
- * ```js
- * const myFunctionReference = api.myModule.myFunction;
- * ```
- */
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   crons: typeof crons;
+  debug: typeof debug;
+  enqueue: typeof enqueue;
+  finalize: typeof finalize;
   githubActions: typeof githubActions;
   githubIssues: typeof githubIssues;
   helpers: typeof helpers;
@@ -50,150 +51,39 @@ declare const fullApi: ApiFromModules<{
   llmWorker: typeof llmWorker;
   queue: typeof queue;
   rateLimiter: typeof rateLimiter;
-  "resend/ResendOTP": typeof resend_ResendOTP;
-  "resend/ResendOTPPasswordReset": typeof resend_ResendOTPPasswordReset;
-  "resend/sendReportEmail": typeof resend_sendReportEmail;
+  requeue: typeof requeue;
+  "sendamatic/SendamaticClient": typeof sendamatic_SendamaticClient;
+  "sendamatic/SendamaticOTP": typeof sendamatic_SendamaticOTP;
+  "sendamatic/SendamaticOTPPasswordReset": typeof sendamatic_SendamaticOTPPasswordReset;
+  "sendamatic/emailRenderer": typeof sendamatic_emailRenderer;
+  "sendamatic/sendReportEmail": typeof sendamatic_sendReportEmail;
   users: typeof users;
 }>;
-declare const fullApiWithMounts: typeof fullApi;
 
+/**
+ * A utility for referencing Convex functions in your app's public API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
 export declare const api: FilterApi<
-  typeof fullApiWithMounts,
+  typeof fullApi,
   FunctionReference<any, "public">
 >;
+
+/**
+ * A utility for referencing Convex functions in your app's internal API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = internal.myModule.myFunction;
+ * ```
+ */
 export declare const internal: FilterApi<
-  typeof fullApiWithMounts,
+  typeof fullApi,
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {
-  resend: {
-    lib: {
-      cancelEmail: FunctionReference<
-        "mutation",
-        "internal",
-        { emailId: string },
-        null
-      >;
-      cleanupAbandonedEmails: FunctionReference<
-        "mutation",
-        "internal",
-        { olderThan?: number },
-        null
-      >;
-      cleanupOldEmails: FunctionReference<
-        "mutation",
-        "internal",
-        { olderThan?: number },
-        null
-      >;
-      createManualEmail: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          from: string;
-          headers?: Array<{ name: string; value: string }>;
-          replyTo?: Array<string>;
-          subject: string;
-          to: string;
-        },
-        string
-      >;
-      get: FunctionReference<
-        "query",
-        "internal",
-        { emailId: string },
-        {
-          complained: boolean;
-          createdAt: number;
-          errorMessage?: string;
-          finalizedAt: number;
-          from: string;
-          headers?: Array<{ name: string; value: string }>;
-          html?: string;
-          opened: boolean;
-          replyTo: Array<string>;
-          resendId?: string;
-          segment: number;
-          status:
-            | "waiting"
-            | "queued"
-            | "cancelled"
-            | "sent"
-            | "delivered"
-            | "delivery_delayed"
-            | "bounced"
-            | "failed";
-          subject: string;
-          text?: string;
-          to: string;
-        } | null
-      >;
-      getStatus: FunctionReference<
-        "query",
-        "internal",
-        { emailId: string },
-        {
-          complained: boolean;
-          errorMessage: string | null;
-          opened: boolean;
-          status:
-            | "waiting"
-            | "queued"
-            | "cancelled"
-            | "sent"
-            | "delivered"
-            | "delivery_delayed"
-            | "bounced"
-            | "failed";
-        } | null
-      >;
-      handleEmailEvent: FunctionReference<
-        "mutation",
-        "internal",
-        { event: any },
-        null
-      >;
-      sendEmail: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          from: string;
-          headers?: Array<{ name: string; value: string }>;
-          html?: string;
-          options: {
-            apiKey: string;
-            initialBackoffMs: number;
-            onEmailEvent?: { fnHandle: string };
-            retryAttempts: number;
-            testMode: boolean;
-          };
-          replyTo?: Array<string>;
-          subject: string;
-          text?: string;
-          to: string;
-        },
-        string
-      >;
-      updateManualEmail: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          emailId: string;
-          errorMessage?: string;
-          resendId?: string;
-          status:
-            | "waiting"
-            | "queued"
-            | "cancelled"
-            | "sent"
-            | "delivered"
-            | "delivery_delayed"
-            | "bounced"
-            | "failed";
-        },
-        null
-      >;
-    };
-  };
-};
+export declare const components: {};

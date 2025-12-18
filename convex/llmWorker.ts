@@ -12,7 +12,7 @@ import { analyzeIssueOpenAIStyle } from "./llmClient";
 
 const MAX_CONCURRENT = 3; // keep low to avoid provider burst 429
 const ESTIMATE_TOKENS_DEFAULT = 1300;
-const MAX_TOKENS = 260;
+const MAX_TOKENS = 800;
 
 /* ===================== Locks ===================== */
 export const acquireLock = mutation({
@@ -235,25 +235,39 @@ export const updateIssuesBatch = mutation({
 
 /* =============== Util untuk cek status batch =============== */
 function pendingCount(report: any) {
-  return report.issues.filter((i: any) => i.relevanceScore === 0 && (i.explanation === "" || i.explanation.includes("Analysis")))
-    .length;
+  return report.issues.filter(
+    (i: any) => i.explanation === "" || (i.explanation.includes("Analysis") && !i.explanation.includes("No relevance")),
+  ).length;
 }
 
 /* =============== Rescue: cari report yang siap next batch saat antrian kosong =============== */
 export const getReportsReadyForNextBatch = query({
   args: { limit: v.number() },
   handler: async (ctx, args) => {
-    const candidates = await ctx.db
+    // Handle incomplete reports with queued/fetched issues
+    const incompleteReports = await ctx.db
       .query("reports")
       .filter((q) => q.eq(q.field("isComplete"), false))
       .collect();
 
-    const ready = candidates
+    const fromIncomplete = incompleteReports
       .filter((r: any) => !!r.batchCursor && pendingCount(r) === 0)
-      .sort((a: any, b: any) => a.createdAt - b.createdAt)
-      .slice(0, args.limit);
+      .sort((a: any, b: any) => a.createdAt - b.createdAt);
 
-    console.log("[GIW][readyNextBatch] found:", ready.length);
+    // Handle complete reports that haven't sent final email
+    const completeReports = await ctx.db
+      .query("reports")
+      .filter((q) => q.and(q.eq(q.field("isComplete"), true), q.eq(q.field("isCanceled"), undefined)))
+      .collect();
+
+    const fromComplete = completeReports.filter((r: any) => !r.finalEmailAt).sort((a: any, b: any) => a.createdAt - b.createdAt);
+
+    const ready = [...fromIncomplete, ...fromComplete].slice(0, args.limit);
+
+    console.log("[GIW][readyNextBatch] found:", ready.length, {
+      fromIncomplete: fromIncomplete.length,
+      fromComplete: fromComplete.length,
+    });
     return ready.map((r: any) => r._id);
   },
 });
@@ -348,9 +362,17 @@ export const tick = action({
       if (work.length === 0) {
         const ready = await ctx.runQuery(api.llmWorker.getReportsReadyForNextBatch, { limit: 3 });
         if (ready.length > 0) {
-          console.log("[GIW][tick] rescue → trigger processNextBatch for", ready.length, "report(s)");
+          console.log("[GIW][tick] rescue → trigger actions for", ready.length, "report(s)");
           for (const reportId of ready) {
-            await ctx.scheduler.runAfter(0, api.githubIssues.processNextBatch, { reportId });
+            const report = await ctx.runQuery(api.githubIssues.getReport, { reportId: reportId as unknown as Id<"reports"> });
+
+            if (report?.isComplete && !report.finalEmailAt) {
+              console.log("[GIW][tick] rescue → send final email for", String(reportId));
+              await ctx.scheduler.runAfter(0, api.sendamatic.sendReportEmail.sendReportEmail, { reportId });
+            } else if (report?.batchCursor && pendingCount(report) === 0) {
+              console.log("[GIW][tick] rescue → processNextBatch for", String(reportId));
+              await ctx.scheduler.runAfter(0, api.githubIssues.processNextBatch, { reportId });
+            }
           }
           await ctx.scheduler.runAfter(0, api.llmWorker.tick, {});
           return;
@@ -506,13 +528,13 @@ export const tick = action({
             batchCursor: undefined,
             isComplete: true,
           });
-          await ctx.scheduler.runAfter(0, api.resend.sendReportEmail.sendReportEmail, { reportId: rid });
+          await ctx.scheduler.runAfter(0, api.sendamatic.sendReportEmail.sendReportEmail, { reportId: rid });
           continue;
         }
 
         if (remaining === 0 && report.batchCursor && activeTasks === 0 && !report.isCanceled) {
           console.log("[GIW][tick] partial email + next batch for:", String(rid));
-          await ctx.scheduler.runAfter(0, api.resend.sendReportEmail.sendReportEmail, { reportId: rid });
+          await ctx.scheduler.runAfter(0, api.sendamatic.sendReportEmail.sendReportEmail, { reportId: rid });
           await ctx.scheduler.runAfter(0, api.githubIssues.processNextBatch, { reportId: rid });
         }
       }

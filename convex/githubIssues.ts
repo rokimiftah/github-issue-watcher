@@ -174,9 +174,10 @@ export const storeIssues = action({
     }
 
     console.log("[GIW][storeIssues] fetchIssuesBatch → call");
+    const targetBatchSize = 100; // GitHub API limit is 100 issues per request
     const { issues, pageInfo } = await ctx.runAction(api.githubActions.fetchIssuesBatch, {
       repoUrl,
-      batchSize: 50,
+      batchSize: targetBatchSize,
       after: existingReport?.batchCursor,
     });
     console.log("[GIW][storeIssues] fetchIssuesBatch → ok", {
@@ -257,7 +258,7 @@ export const processNextBatch = action({
         hasCursor: !!report?.batchCursor,
       });
       if (report?.isComplete) {
-        await ctx.runAction(api.resend.sendReportEmail.sendReportEmail, {
+        await ctx.runAction(api.sendamatic.sendReportEmail.sendReportEmail, {
           reportId: args.reportId,
         });
         console.log("[GIW][processNextBatch] final email scheduled");
@@ -265,7 +266,8 @@ export const processNextBatch = action({
       return;
     }
 
-    const batchSize = 50;
+    const batchSize = 100; // GitHub API limit is 100 issues per request
+    const MAX_ISSUES = 4000; // Maximum total issues to process
 
     console.log("[GIW][processNextBatch] fetch next batch", {
       repoUrl: report.repoUrl,
@@ -284,6 +286,20 @@ export const processNextBatch = action({
     });
 
     const allIssues = [...report.issues, ...issues];
+
+    // Check if we've reached the maximum issues limit
+    if (allIssues.length >= MAX_ISSUES) {
+      console.log("[GIW][processNextBatch] reached max issues limit", {
+        current: allIssues.length,
+        max: MAX_ISSUES,
+      });
+      await ctx.runMutation(api.githubIssues.updateReport, {
+        reportId: args.reportId,
+        issues: allIssues.slice(0, MAX_ISSUES),
+        isComplete: true,
+      });
+      return;
+    }
 
     await ctx.runMutation(api.githubIssues.updateReport, {
       reportId: args.reportId,
@@ -316,6 +332,24 @@ export const processNextBatch = action({
     });
     await ctx.scheduler.runAfter(0, api.llmWorker.tick, {});
     console.log("[GIW][processNextBatch] tick scheduled");
+
+    // Automatically schedule next batch if there are more issues
+    if (pageInfo.hasNextPage) {
+      console.log("[GIW][processNextBatch] scheduling next batch", {
+        reportId: args.reportId,
+        nextCursor: pageInfo.endCursor,
+        currentTotal: allIssues.length,
+        maxIssues: MAX_ISSUES,
+      });
+      await ctx.scheduler.runAfter(500, api.githubIssues.processNextBatch, {
+        reportId: args.reportId,
+      });
+    } else {
+      console.log("[GIW][processNextBatch] all batches processed", {
+        reportId: args.reportId,
+        totalIssues: allIssues.length,
+      });
+    }
   },
 });
 
