@@ -2,7 +2,8 @@
 
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalAction, internalMutation, mutation, query } from "./_generated/server";
 
 export const LIMITS = {
   RPM: 700,
@@ -12,6 +13,8 @@ export const LIMITS = {
   ENABLE_TPD: false,
   TPD: Number.MAX_SAFE_INTEGER,
 };
+
+const KEEP_MINUTES = 5; // Keep buckets for 5 minutes after creation
 
 function minuteBucket(ms: number) {
   return `m:${Math.floor(ms / 60_000)}`;
@@ -72,5 +75,32 @@ export const clearAll = mutation({
   handler: async (ctx) => {
     const rows = await ctx.db.query("rate_limits").collect();
     for (const r of rows) await ctx.db.delete(r._id);
+  },
+});
+
+export const vacuumOldBuckets = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const cutoffMinute = Math.floor(now / 60_000) - KEEP_MINUTES;
+
+    const rows = await ctx.db.query("rate_limits").collect();
+    for (const row of rows) {
+      // Parse bucket from "m:{minute}" format
+      const match = row.bucket.match(/^m:(\d+)$/);
+      if (match) {
+        const bucketMinute = parseInt(match[1], 10);
+        if (bucketMinute < cutoffMinute) {
+          await ctx.db.delete(row._id);
+        }
+      }
+    }
+  },
+});
+
+export const vacuumOldBucketsCron = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.runMutation(internal.rateLimiter.vacuumOldBuckets, {});
   },
 });

@@ -234,9 +234,14 @@ export const updateIssuesBatch = mutation({
 });
 
 /* =============== Util untuk cek status batch =============== */
+// Returns count of issues that haven't been analyzed yet
 function pendingCount(report: any) {
   return report.issues.filter(
-    (i: any) => i.explanation === "" || (i.explanation.includes("Analysis") && !i.explanation.includes("No relevance")),
+    (i: any) =>
+      !i.explanation ||
+      i.explanation === "" ||
+      i.explanation.startsWith("Analysis failed") ||
+      i.explanation.startsWith("Analysis temporarily unavailable"),
   ).length;
 }
 
@@ -244,20 +249,21 @@ function pendingCount(report: any) {
 export const getReportsReadyForNextBatch = query({
   args: { limit: v.number() },
   handler: async (ctx, args) => {
-    // Handle incomplete reports with queued/fetched issues
+    // Handle incomplete reports with queued/fetched issues - use index for performance
     const incompleteReports = await ctx.db
       .query("reports")
-      .filter((q) => q.eq(q.field("isComplete"), false))
+      .withIndex("isComplete_createdAt", (q) => q.eq("isComplete", false))
       .collect();
 
     const fromIncomplete = incompleteReports
-      .filter((r: any) => !!r.batchCursor && pendingCount(r) === 0)
+      .filter((r: any) => !!r.batchCursor && !r.isCanceled && pendingCount(r) === 0)
       .sort((a: any, b: any) => a.createdAt - b.createdAt);
 
-    // Handle complete reports that haven't sent final email
+    // Handle complete reports that haven't sent final email - use index with filter for isCanceled
     const completeReports = await ctx.db
       .query("reports")
-      .filter((q) => q.and(q.eq(q.field("isComplete"), true), q.eq(q.field("isCanceled"), undefined)))
+      .withIndex("isComplete_createdAt", (q) => q.eq("isComplete", true))
+      .filter((q) => q.eq(q.field("isCanceled"), undefined))
       .collect();
 
     const fromComplete = completeReports.filter((r: any) => !r.finalEmailAt).sort((a: any, b: any) => a.createdAt - b.createdAt);
@@ -504,9 +510,7 @@ export const tick = action({
         });
         if (!report) continue;
 
-        const remaining = report.issues.filter(
-          (i: any) => i.relevanceScore === 0 && (i.explanation === "" || i.explanation.includes("Analysis")),
-        ).length;
+        const remaining = pendingCount(report);
 
         const { total: activeTasks } = await ctx.runQuery(api.llmWorker.countActiveTasksForReport, {
           reportId: rid,

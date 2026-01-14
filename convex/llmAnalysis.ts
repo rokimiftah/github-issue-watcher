@@ -13,6 +13,17 @@ const MAX_CONCURRENT = 3; // align with provider-friendly concurrency
 const ESTIMATE_TOKENS_DEFAULT = 1300;
 const MAX_RETRIES = 3;
 
+// Check if an issue needs analysis (consistent with llmWorker.pendingCount)
+function needsAnalysis(i: { relevanceScore: number; explanation: string }): boolean {
+  return (
+    i.relevanceScore === 0 &&
+    (!i.explanation ||
+      i.explanation === "" ||
+      i.explanation.startsWith("Analysis failed") ||
+      i.explanation.startsWith("Analysis temporarily unavailable"))
+  );
+}
+
 function enforceNonMultipleOfFive(n: number, salt: number): number {
   if (!Number.isFinite(n)) return 0;
   const clamped = Math.max(0, Math.min(100, Math.round(n)));
@@ -69,7 +80,7 @@ async function safeAnalyzeIssue(
       const m: any = resp?.choices?.[0]?.message;
       console.log("[GIW][LLM][Analysis] Message object:", JSON.stringify(m, null, 2));
 
-      fullResponse = m?.content ?? "";
+      fullResponse = m?.content ?? m?.reasoning_content ?? "";
 
       console.log("[GIW][LLM][Analysis] Extracted content:", fullResponse);
 
@@ -136,9 +147,7 @@ export const analyzeIssues = action({
 
     const model = process.env.LLM_MODEL as string;
 
-    const issuesToAnalyze = report.issues
-      .filter((i) => i.relevanceScore === 0 && (i.explanation === "" || i.explanation.includes("Analysis failed")))
-      .slice(0, ISSUES_PER_BATCH);
+    const issuesToAnalyze = report.issues.filter(needsAnalysis).slice(0, ISSUES_PER_BATCH);
 
     console.log("[GIW][analyzeIssues] plan", {
       pick: issuesToAnalyze.length,
@@ -149,9 +158,7 @@ export const analyzeIssues = action({
       console.log("[GIW][analyzeIssues] no issues to analyze", {
         hasCursor: !!report.batchCursor,
       });
-      const allUnanalyzedIssues = report.issues.filter(
-        (i) => i.relevanceScore === 0 && (i.explanation === "" || i.explanation.includes("Analysis failed")),
-      ).length;
+      const allUnanalyzedIssues = report.issues.filter(needsAnalysis).length;
       const isComplete = !report.batchCursor && allUnanalyzedIssues === 0;
 
       if (isComplete && !report.isComplete) {
@@ -263,9 +270,7 @@ export const analyzeIssues = action({
     });
     console.log("[GIW][analyzeIssues] requestCounter++", { reportId });
 
-    const allUnanalyzedIssues = updatedIssues.filter(
-      (i) => i.relevanceScore === 0 && (i.explanation === "" || i.explanation.includes("Analysis failed")),
-    ).length;
+    const allUnanalyzedIssues = updatedIssues.filter(needsAnalysis).length;
     const isComplete = !report.batchCursor && allUnanalyzedIssues === 0;
 
     await ctx.runMutation(api.githubIssues.updateReport, {

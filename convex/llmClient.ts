@@ -5,15 +5,18 @@ import { ConvexError } from "convex/values";
 import OpenAI from "openai";
 
 const LLM_API_KEY = process.env.LLM_API_KEY;
-if (!LLM_API_KEY) throw new Error("LLM_API_KEY is not set");
-
 const LLM_API_URL = process.env.LLM_API_URL || "https://apis.iflow.cn/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "glm-4.6";
 
-export const openai = new OpenAI({
-  apiKey: LLM_API_KEY,
-  baseURL: LLM_API_URL,
-});
+function getOpenAIClient(): OpenAI {
+  if (!LLM_API_KEY) {
+    throw new ConvexError("LLM_API_KEY is not set");
+  }
+  return new OpenAI({
+    apiKey: LLM_API_KEY,
+    baseURL: LLM_API_URL,
+  });
+}
 
 function stripFences(s: string) {
   return s
@@ -78,6 +81,7 @@ ${(issue.body || "").slice(0, 3000)}
 
   let full = "";
   try {
+    const openai = getOpenAIClient();
     const resp: any = await openai.chat.completions.create({
       model: LLM_MODEL,
       messages: [
