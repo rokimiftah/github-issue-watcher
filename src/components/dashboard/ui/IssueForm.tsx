@@ -26,8 +26,7 @@ export function IssueForm({ onReportGenerated, isAnalysisRunning, setIsAnalysisR
   const form = useForm({
     initialValues: { repoUrl: "", keyword: "" },
     validate: {
-      repoUrl: (value) =>
-        /^https:\/\/github.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9-]+$/.test(value) ? null : "Invalid GitHub repository URL",
+      repoUrl: (value) => (/^https:\/\/github\.com\/[\w-]+\/[\w-]+$/.test(value) ? null : "Invalid GitHub repository URL"),
       keyword: (value) => (value.length > 0 ? null : "Keyword is required"),
     },
   });
@@ -48,10 +47,18 @@ export function IssueForm({ onReportGenerated, isAnalysisRunning, setIsAnalysisR
       onReportGenerated(newReportId as Id<"reports">);
       form.reset();
     } catch (error) {
-      if (error instanceof ConvexError && error.data.includes("GitHub authentication failed")) {
+      // ConvexError.data can be: undefined, null, string, object, or empty string
+      // Prefer data if it's a non-empty string, otherwise use message
+      const errorMessage =
+        error instanceof ConvexError && typeof error.data === "string" && error.data.length > 0
+          ? error.data
+          : error instanceof Error
+            ? error.message
+            : "An unexpected error occurred";
+      if (errorMessage.includes("GitHub authentication failed")) {
         setError("GitHub authentication failed. Please contact the administrator to verify the GITHUB_TOKEN.");
       } else {
-        setError(error instanceof ConvexError ? error.data : "An unexpected error occurred");
+        setError(errorMessage);
       }
     } finally {
       setIsAnalysisRunning(false);

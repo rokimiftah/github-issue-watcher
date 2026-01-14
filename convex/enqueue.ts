@@ -1,3 +1,5 @@
+// convex/enqueue.ts
+
 import { v } from "convex/values";
 
 import { mutation } from "./_generated/server";
@@ -8,15 +10,13 @@ export const enqueueMissingTasks = mutation({
     const report = await ctx.db.get(args.reportId);
     if (!report) throw new Error("Report not found");
 
-    const issueIds = ["I_kwDOLdZc7c6QNdGh", "I_kwDOLdZc7c6TqlH9", "I_kwDOLdZc7c6ULFdi", "I_kwDOLdZc7c6auN2E"];
-
     const tasks = await ctx.db
       .query("analysis_tasks")
       .withIndex("report_status", (q) => q.eq("reportId", args.reportId))
       .collect();
 
     const existingIssueIds = new Set(tasks.map((t) => t.issue.id));
-    const missingIssues = report.issues.filter((i) => issueIds.includes(i.id) && !existingIssueIds.has(i.id));
+    const missingIssues = report.issues.filter((i) => !existingIssueIds.has(i.id));
 
     console.log(`[ENQUEUE] found ${missingIssues.length} missing issues to enqueue`);
 

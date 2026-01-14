@@ -48,7 +48,9 @@ export default defineSchema({
   })
     .index("userEmail", ["userEmail"])
     .index("userId", ["userId"])
-    .index("repoUrl_keyword", ["repoUrl", "keyword"]),
+    .index("repoUrl_keyword", ["repoUrl", "keyword"])
+    .index("isComplete", ["isComplete"])
+    .index("isComplete_createdAt", ["isComplete", "createdAt"]),
 
   analysis_tasks: defineTable({
     reportId: v.id("reports"),

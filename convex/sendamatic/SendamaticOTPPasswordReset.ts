@@ -25,7 +25,7 @@ export const SendamaticOTPPasswordReset = Email({
     });
 
     const result = await sendamatic.sendEmail({
-      from: "GitHub Issue Watcher <accounts@giw.giw.id>",
+      from: "GitHub Issue Watcher <accounts@giw.web.id>",
       to: email,
       subject: "Reset Your Password for GIW",
       html: htmlEmail,

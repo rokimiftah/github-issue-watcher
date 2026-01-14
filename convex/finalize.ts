@@ -14,7 +14,7 @@ export const markDone = mutation({
         return {
           ...issue,
           relevanceScore: 0,
-          explanation: "No relevance to 'mcp' found in title, body, or labels.",
+          explanation: "No relevant keyword match found in title, body, or labels.",
           matchedTerms: [],
           evidence: [],
         };

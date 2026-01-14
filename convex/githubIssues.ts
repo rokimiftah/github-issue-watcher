@@ -9,6 +9,8 @@ import { ConvexError, v } from "convex/values";
 import { api } from "./_generated/api";
 import { action, mutation, query } from "./_generated/server";
 
+const GITHUB_REPO_URL_REGEX = /^https:\/\/github\.com\/[\w-]+\/[\w-]+$/;
+
 const IssueArg = v.object({
   id: v.string(),
   number: v.number(),
@@ -43,7 +45,7 @@ export const saveReport = mutation({
     if (!userId) {
       throw new ConvexError("User must be authenticated to save a report");
     }
-    if (!/^https:\/\/github.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9-]+$/.test(repoUrl)) {
+    if (!GITHUB_REPO_URL_REGEX.test(repoUrl)) {
       throw new ConvexError("Invalid GitHub repository URL");
     }
     try {
@@ -76,7 +78,7 @@ export const updateReport = mutation({
     requestCounter: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { reportId, issues, batchCursor, isComplete, isCanceled } = args;
+    const { reportId, issues, batchCursor, isComplete, isCanceled, requestCounter } = args;
     console.log("[GIW][updateReport] patch", {
       reportId,
       issues: issues.length,
@@ -91,6 +93,7 @@ export const updateReport = mutation({
         batchCursor,
         isComplete,
         isCanceled,
+        ...(requestCounter !== undefined && { requestCounter }),
       });
     } catch (error) {
       throw new ConvexError(
@@ -152,13 +155,16 @@ export const storeIssues = action({
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("User must be authenticated");
 
-    if (!/^https:\/\/github\.com\/[\w-]+\/[\w-]+$/.test(repoUrl)) {
+    if (!GITHUB_REPO_URL_REGEX.test(repoUrl)) {
       throw new ConvexError("Invalid GitHub repository URL");
     }
 
     const normalizedKeyword = keyword.toLowerCase();
 
-    const existingReport = await ctx.runQuery(api.githubIssues.getReportByRepoAndKeyword, { repoUrl, keyword });
+    const existingReport = await ctx.runQuery(api.githubIssues.getReportByRepoAndKeyword, {
+      repoUrl,
+      keyword: normalizedKeyword,
+    });
     console.log("[GIW][storeIssues] existingReport?", {
       exists: !!existingReport,
       isComplete: existingReport?.isComplete,
@@ -393,8 +399,9 @@ export const deleteReportDeep = action({
     await ctx.runMutation(api.llmWorker.deleteTasksForReport, {
       reportId: args.reportId,
     });
-    await ctx.runMutation(api.llmWorker.clearLocks, {});
-    await ctx.runMutation(api.rateLimiter.clearAll, {});
+    // Note: clearLocks and clearAll rate limits are removed as they affect global state
+    // Rate limits are shared across users and should only be cleaned up by vacuum
+    // Locks are global for worker coordination and should not be cleared per-report
     await ctx.runMutation(api.githubIssues.removeReport, {
       reportId: args.reportId,
     });
@@ -478,6 +485,7 @@ export const updateEmailMeta = mutation({
     const patch: any = {};
     if (args.lastPartialEmailAt !== undefined) patch.lastPartialEmailAt = args.lastPartialEmailAt;
     if (args.lastPartialDigest !== undefined) patch.lastPartialDigest = args.lastPartialDigest;
+    if (Object.keys(patch).length === 0) return; // Skip empty patch
     await ctx.db.patch(args.reportId, patch);
   },
 });
@@ -486,6 +494,19 @@ export const markFinalEmailSent = mutation({
   args: { reportId: v.id("reports") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.reportId, { finalEmailAt: Date.now() });
+  },
+});
+
+// Atomically claim final email send using compare-and-set
+export const claimFinalEmailSend = mutation({
+  args: { reportId: v.id("reports") },
+  handler: async (ctx, args) => {
+    const report = await ctx.db.get(args.reportId);
+    if (!report) throw new ConvexError("Report not found");
+    if (report.finalEmailAt) return { claimed: false, alreadySent: true };
+    if (report.isCanceled) return { claimed: false, canceled: true };
+    await ctx.db.patch(args.reportId, { finalEmailAt: Date.now() });
+    return { claimed: true, alreadySent: false };
   },
 });
 
