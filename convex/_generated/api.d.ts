@@ -17,6 +17,7 @@ import type * as githubActions from "../githubActions.js";
 import type * as githubIssues from "../githubIssues.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
+import type * as iflow from "../iflow.js";
 import type * as llmAnalysis from "../llmAnalysis.js";
 import type * as llmClient from "../llmClient.js";
 import type * as llmWorker from "../llmWorker.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   githubIssues: typeof githubIssues;
   helpers: typeof helpers;
   http: typeof http;
+  iflow: typeof iflow;
   llmAnalysis: typeof llmAnalysis;
   llmClient: typeof llmClient;
   llmWorker: typeof llmWorker;
