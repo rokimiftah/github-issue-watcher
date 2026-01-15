@@ -89,4 +89,11 @@ export default defineSchema({
     leaseExpiresAt: v.number(),
     owner: v.optional(v.string()),
   }).index("name", ["name"]),
+
+  appSettings: defineTable({
+    key: v.string(),
+    value: v.string(),
+    expireTime: v.string(),
+    updatedAt: v.string(),
+  }).index("by_key", ["key"]),
 });

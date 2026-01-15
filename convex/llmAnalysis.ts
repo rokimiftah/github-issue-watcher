@@ -140,8 +140,15 @@ export const analyzeIssues = action({
       return;
     }
 
+    // Get API key from iflow (with auto-refresh) or fallback to env
+    const apiKey = await ctx.runAction(api.iflow.refreshApiKey);
+    if (!apiKey) {
+      console.log("[GIW][analyzeIssues] No API key available → exit");
+      return;
+    }
+
     const openai = new OpenAI({
-      apiKey: process.env.LLM_API_KEY,
+      apiKey: apiKey,
       baseURL: process.env.LLM_API_URL,
     });
 

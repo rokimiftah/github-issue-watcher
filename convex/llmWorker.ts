@@ -8,11 +8,12 @@ import { ConvexError, v } from "convex/values";
 
 import { api, internal } from "./_generated/api";
 import { action, internalAction, internalMutation, mutation, query } from "./_generated/server";
-import { analyzeIssueOpenAIStyle } from "./llmClient";
+import { analyzeIssueOpenAIStyle, RateLimitError } from "./llmClient";
 
-const MAX_CONCURRENT = 3; // keep low to avoid provider burst 429
+const MAX_CONCURRENT = 2; // Reduced to avoid iFlow rate limit
 const ESTIMATE_TOKENS_DEFAULT = 1300;
 const MAX_TOKENS = 800;
+const RATE_LIMIT_BACKOFF_MS = 5000; // 5 seconds backoff when rate limited
 
 /* ===================== Locks ===================== */
 export const acquireLock = mutation({
@@ -387,6 +388,14 @@ export const tick = action({
         return; // don't reschedule when system is idle
       }
 
+      // Get API key (from iflow or fallback to env)
+      const apiKey = await ctx.runAction(api.iflow.refreshApiKey);
+      if (!apiKey) {
+        console.log("[GIW][tick] No API key available → sleep");
+        await ctx.scheduler.runAfter(5000, api.llmWorker.tick, {});
+        return;
+      }
+
       // === PROSES PER-CHUNK ===
       for (let i = 0; i < work.length; i += MAX_CONCURRENT) {
         // budget guard: jangan biarkan tick melewati budget
@@ -433,12 +442,24 @@ export const tick = action({
                   keyword: task.keyword,
                   issue: task.issue,
                   maxTokens: MAX_TOKENS,
+                  apiKey: apiKey,
                 }),
                 LLM_TIMEOUT_MS,
                 `analyze #${task.issue.number}`,
               );
               successes.push({ task, res });
             } catch (err: any) {
+              // Check if this is a rate limit error
+              if (err instanceof RateLimitError || err?.message?.includes("rate limit")) {
+                console.warn("[GIW][tick] Rate limit detected, will backoff");
+                // Requeue without incrementing attempts for rate limit
+                await ctx.runMutation(api.llmWorker.markTaskRequeueOrError, {
+                  id: task._id,
+                  attempts: task.attempts ?? 0, // Don't increment for rate limit
+                  error: "Rate limit - will retry",
+                });
+                return;
+              }
               const attempts = (task.attempts ?? 0) + 1;
               await ctx.runMutation(api.llmWorker.markTaskRequeueOrError, {
                 id: task._id,
@@ -448,6 +469,14 @@ export const tick = action({
             }
           }),
         );
+
+        // Check if any rate limit errors occurred in this batch
+        const hadRateLimit = chunk.length > successes.length;
+        if (hadRateLimit) {
+          console.log("[GIW][tick] Rate limit encountered, backing off for", RATE_LIMIT_BACKOFF_MS, "ms");
+          await ctx.scheduler.runAfter(RATE_LIMIT_BACKOFF_MS, api.llmWorker.tick, {});
+          return; // Exit early to respect rate limit
+        }
 
         // Group successful results by reportId and write per-report to avoid conflicts
         const byReport = new Map<string, Success[]>();

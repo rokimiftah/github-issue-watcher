@@ -4,16 +4,23 @@
 import { ConvexError } from "convex/values";
 import OpenAI from "openai";
 
-const LLM_API_KEY = process.env.LLM_API_KEY;
 const LLM_API_URL = process.env.LLM_API_URL || "https://apis.iflow.cn/v1";
-const LLM_MODEL = process.env.LLM_MODEL || "glm-4.6";
+const LLM_MODEL = process.env.LLM_MODEL || "qwen3-max";
 
-function getOpenAIClient(): OpenAI {
-  if (!LLM_API_KEY) {
+// Custom error for rate limiting
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitError";
+  }
+}
+
+function getOpenAIClient(apiKey: string): OpenAI {
+  if (!apiKey) {
     throw new ConvexError("LLM_API_KEY is not set");
   }
   return new OpenAI({
-    apiKey: LLM_API_KEY,
+    apiKey: apiKey,
     baseURL: LLM_API_URL,
   });
 }
@@ -54,8 +61,9 @@ export async function analyzeIssueOpenAIStyle(opts: {
     createdAt: string;
   };
   maxTokens?: number;
+  apiKey: string;
 }): Promise<AnalysisResult> {
-  const { keyword, issue, maxTokens = 260 } = opts;
+  const { keyword, issue, maxTokens = 260, apiKey } = opts;
 
   const systemPrompt = "You are a helpful assistant capable of complex reasoning. Always think step-by-step before answering.";
 
@@ -81,7 +89,7 @@ ${(issue.body || "").slice(0, 3000)}
 
   let full = "";
   try {
-    const openai = getOpenAIClient();
+    const openai = getOpenAIClient(apiKey);
     const resp: any = await openai.chat.completions.create({
       model: LLM_MODEL,
       messages: [
@@ -96,6 +104,12 @@ ${(issue.body || "").slice(0, 3000)}
 
     console.log("[GIW][LLM] Raw response:", JSON.stringify(resp, null, 2));
 
+    // Check for rate limit error (iFlow returns status 449)
+    if (resp?.status === "449" || resp?.msg?.includes("rate limit")) {
+      console.warn("[GIW][LLM] Rate limit hit from iFlow");
+      throw new RateLimitError("iFlow rate limit exceeded");
+    }
+
     const m: any = resp?.choices?.[0]?.message;
     console.log("[GIW][LLM] Message object:", JSON.stringify(m, null, 2));
 
@@ -104,6 +118,10 @@ ${(issue.body || "").slice(0, 3000)}
     console.log("[GIW][LLM] Extracted content:", full);
 
     if (!full) {
+      // Check if this is actually a rate limit response
+      if (resp?.status === "449" || resp?.msg?.includes("rate limit")) {
+        throw new RateLimitError("iFlow rate limit exceeded");
+      }
       console.error("[GIW][LLM] Empty content detected. Full response structure:", resp);
       throw new ConvexError("Empty LLM response");
     }

@@ -6,7 +6,7 @@ import { internal } from "./_generated/api";
 import { internalAction, internalMutation, mutation, query } from "./_generated/server";
 
 export const LIMITS = {
-  RPM: 700,
+  RPM: 20, // iFlow rate limit ~20-30 RPM, using conservative 20
   RPH: Number.MAX_SAFE_INTEGER,
   TPM: Number.MAX_SAFE_INTEGER,
   TPH: Number.MAX_SAFE_INTEGER,
